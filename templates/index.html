@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>High-Low AI Game - 正式ルール版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-white min-h-screen p-6">
+    <div class="max-w-4xl mx-auto space-y-6">
+        <h1 class="text-3xl font-bold text-center text-yellow-400">🃏 最適AI対戦型 ハイ＆ロー（正式ルール版）</h1>
+
+        <!-- ダッシュボード -->
+        <div class="bg-gray-800 p-4 rounded-xl border border-yellow-500/30 shadow-lg">
+            <div class="flex justify-between items-center mb-2 border-b border-gray-700 pb-2">
+                <h2 class="text-md font-bold text-yellow-400">🏆 通算対戦成績</h2>
+                <button onclick="resetStats()" class="text-xs bg-red-900 hover:bg-red-800 text-red-200 px-3 py-1 rounded">戦績リセット</button>
+            </div>
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-3 text-center text-sm">
+                <div class="bg-gray-700/50 p-2 rounded">総対戦数: <span id="stat-total" class="font-bold">0</span>回</div>
+                <div class="bg-gray-700/50 p-2 rounded">勝-負-分: <span id="stat-record" class="font-bold text-blue-400">0-0-0</span></div>
+                <div class="bg-gray-700/50 p-2 rounded">勝率: <span id="stat-winrate" class="font-bold text-green-400">0.0%</span></div>
+                <div class="bg-gray-700/50 p-2 rounded">あなたチップ: <span id="stat-human-chips" class="font-bold text-yellow-400">0</span></div>
+                <div class="bg-gray-700/50 p-2 rounded">AIチップ: <span id="stat-ai-chips" class="font-bold text-red-400">0</span></div>
+            </div>
+        </div>
+
+        <!-- ステータス -->
+        <div class="grid grid-cols-3 gap-4 text-center bg-gray-800 p-4 rounded-xl border border-gray-700">
+            <div>
+                <p class="text-gray-400">あなた (残機)</p>
+                <p id="lives-human" class="text-2xl font-bold text-green-400">❤️❤️❤️</p>
+            </div>
+            <div>
+                <p class="text-gray-400">ポット (チップ)</p>
+                <p id="pot" class="text-3xl font-black text-yellow-400">0</p>
+                <p class="text-xs text-gray-500">山札残り: <span id="deck-count">51</span>枚</p>
+            </div>
+            <div>
+                <p class="text-gray-400">AI (残機)</p>
+                <p id="lives-ai" class="text-2xl font-bold text-red-400">❤️❤️❤️</p>
+            </div>
+        </div>
+
+        <!-- カード表示と操作部 -->
+        <div class="bg-gray-800 rounded-xl p-8 text-center border border-gray-700 flex flex-col items-center">
+            <p id="turn-indicator" class="text-lg font-bold text-blue-400 mb-2">👉 あなたの番です</p>
+            <p id="sub-instruction" class="text-xs text-gray-400 mb-4">現在の場のカードより次が 高いか低いか を予測してください</p>
+            
+            <div id="card" class="w-32 h-48 bg-white rounded-lg shadow-2xl flex flex-col justify-between p-4 text-black font-bold text-2xl my-2 transition-transform duration-300">
+                <span id="card-suit-top">♥</span>
+                <span id="card-num" class="text-5xl my-auto">8</span>
+                <span id="card-suit-bottom" class="self-end">♥</span>
+            </div>
+
+            <div id="action-buttons" class="flex gap-4 mt-4">
+                <button onclick="playStep(0)" id="btn-0" class="px-8 py-3 bg-blue-600 hover:bg-blue-500 rounded-lg font-bold text-lg shadow-lg transition">HIGH (高い)</button>
+                <button onclick="playStep(1)" id="btn-1" class="px-8 py-3 bg-red-600 hover:bg-red-500 rounded-lg font-bold text-lg shadow-lg transition">LOW (低い)</button>
+            </div>
+            <p id="msg-box" class="mt-4 text-yellow-300 font-semibold min-h-[1.5rem]"></p>
+        </div>
+
+        <!-- カウンティングパネル -->
+        <div class="bg-gray-800 rounded-xl p-4 border border-gray-700">
+            <h2 class="text-sm font-bold text-gray-400 mb-2">📊 山札リアルタイム・カウンティング</h2>
+            <div id="counts-grid" class="grid grid-cols-13 gap-1 text-center text-xs font-mono"></div>
+            <div class="flex justify-around mt-3 text-sm">
+                <span>赤残り: <strong id="red-count" class="text-red-400">26</strong></span>
+                <span>黒残り: <strong id="black-count" class="text-gray-300">26</strong></span>
+            </div>
+        </div>
+
+        <div class="text-center">
+            <button onclick="resetGame()" class="px-8 py-3 bg-emerald-600 hover:bg-emerald-500 rounded-lg font-bold text-lg shadow-lg transition">
+                リセット / 新規ゲーム 🔄
+            </button>
+        </div>
+    </div>
+
+    <script>
+        async function resetGame() {
+            const res = await fetch('/api/reset', { method: 'POST' });
+            const data = await res.json();
+            updateUI(data);
+            if (!data.is_done) {
+                setButtonsEnabled(true);
+            }
+        }
+
+        async function resetStats() {
+            const res = await fetch('/api/reset_stats', { method: 'POST' });
+            const data = await res.json();
+            updateUI(data);
+            if (!data.is_done) {
+                setButtonsEnabled(true);
+            }
+        }
+
+        async function playStep(action) {
+            setButtonsEnabled(false);
+
+            const res = await fetch('/api/step', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: action })
+            });
+            let data = await res.json();
+            updateUI(data);
+
+            // AIのターン処理ループ
+            while (!data.is_done && data.is_ai_turn) {
+                document.getElementById('turn-indicator').innerText = "🤖 AIが思考・カードをめくっています...";
+                document.getElementById('turn-indicator').className = "text-lg font-bold text-red-400 animate-pulse mb-2";
+
+                await new Promise(r => setTimeout(r, 1200));
+
+                const aiRes = await fetch('/api/ai_step', { method: 'POST' });
+                data = await aiRes.json();
+                updateUI(data); // ここでAI勝利による is_done = true も確実に反映される
+            }
+
+            if (!data.is_done) {
+                setButtonsEnabled(true);
+            }
+        }
+
+        function setButtonsEnabled(enabled) {
+            const b0 = document.getElementById('btn-0');
+            const b1 = document.getElementById('btn-1');
+            b0.disabled = !enabled;
+            b1.disabled = !enabled;
+            if (!enabled) {
+                b0.classList.add('opacity-50', 'cursor-not-allowed');
+                b1.classList.add('opacity-50', 'cursor-not-allowed');
+            } else {
+                b0.classList.remove('opacity-50', 'cursor-not-allowed');
+                b1.classList.remove('opacity-50', 'cursor-not-allowed');
+            }
+        }
+
+        function getCardLabel(num) {
+            if (num === 14) return 'A';
+            if (num === 13) return 'K';
+            if (num === 12) return 'Q';
+            if (num === 11) return 'J';
+            return num;
+        }
+
+        function updateUI(data) {
+            const cardElem = document.getElementById('card');
+            cardElem.classList.add('scale-95');
+            setTimeout(() => cardElem.classList.remove('scale-95'), 150);
+
+            document.getElementById('card-num').innerText = getCardLabel(data.card_num);
+            
+            const isRed = (data.card_suit === '赤');
+            const suitSymbol = isRed ? '♥' : '♠';
+            cardElem.style.color = isRed ? '#dc2626' : '#000000';
+            document.getElementById('card-suit-top').innerText = suitSymbol;
+            document.getElementById('card-suit-bottom').innerText = suitSymbol;
+
+            document.getElementById('lives-human').innerText = '❤️'.repeat(data.lives_human) || '💀';
+            document.getElementById('lives-ai').innerText = '❤️'.repeat(data.lives_ai) || '💀';
+            document.getElementById('pot').innerText = data.pot;
+            document.getElementById('deck-count').innerText = data.remaining_deck;
+
+            if (data.stats) {
+                document.getElementById('stat-total').innerText = data.stats.total_games;
+                document.getElementById('stat-record').innerText = `${data.stats.human_wins}-${data.stats.ai_wins}-${data.stats.draws}`;
+                document.getElementById('stat-winrate').innerText = data.stats.win_rate + '%';
+                document.getElementById('stat-human-chips').innerText = data.stats.human_chips;
+                document.getElementById('stat-ai-chips').innerText = data.stats.ai_chips;
+            }
+
+            const btn0 = document.getElementById('btn-0');
+            const btn1 = document.getElementById('btn-1');
+            if (data.is_color_phase) {
+                document.getElementById('sub-instruction').innerText = "⚡ 同数発生！赤か黒かを予測してください";
+                btn0.innerText = "RED (赤 ♥♦)";
+                btn0.className = "px-8 py-3 bg-red-600 hover:bg-red-500 rounded-lg font-bold text-lg shadow-lg transition";
+                btn1.innerText = "BLACK (黒 ♠♣)";
+                btn1.className = "px-8 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-bold text-lg shadow-lg transition";
+            } else {
+                document.getElementById('sub-instruction').innerText = "現在の場のカードより次が 高いか低いか を予測してください";
+                btn0.innerText = "HIGH (高い)";
+                btn0.className = "px-8 py-3 bg-blue-600 hover:bg-blue-500 rounded-lg font-bold text-lg shadow-lg transition";
+                btn1.innerText = "LOW (低い)";
+                btn1.className = "px-8 py-3 bg-red-600 hover:bg-red-500 rounded-lg font-bold text-lg shadow-lg transition";
+            }
+
+            let msg = data.last_info || "";
+
+            // ゲーム終了時の表示判定
+            if (data.is_done) {
+                msg = `🏆 ゲーム終了！ 勝者: ${data.winner || "引き分け"}`;
+                document.getElementById('action-buttons').classList.add('hidden');
+                document.getElementById('turn-indicator').innerText = "ゲーム終了";
+                document.getElementById('turn-indicator').className = "text-lg font-bold text-yellow-400 mb-2";
+                setButtonsEnabled(false);
+            } else {
+                document.getElementById('action-buttons').classList.remove('hidden');
+                if (data.current_player === 0) {
+                    document.getElementById('turn-indicator').innerText = data.is_color_phase ? "👉 あなたの番です（赤黒予想）" : "👉 あなたの番です";
+                    document.getElementById('turn-indicator').className = "text-lg font-bold text-blue-400 mb-2";
+                } else {
+                    document.getElementById('turn-indicator').innerText = "🤖 AIの番です";
+                    document.getElementById('turn-indicator').className = "text-lg font-bold text-red-400 mb-2";
+                }
+            }
+            document.getElementById('msg-box').innerText = msg;
+
+            const grid = document.getElementById('counts-grid');
+            grid.innerHTML = '';
+            for (let num = 2; num <= 14; num++) {
+                const count = data.counts[num] || 0;
+                const div = document.createElement('div');
+                div.className = 'bg-gray-700 p-1 rounded';
+                div.innerHTML = `<div class="text-gray-400">${getCardLabel(num)}</div><div class="font-bold text-yellow-400">${count}</div>`;
+                grid.appendChild(div);
+            }
+            document.getElementById('red-count').innerText = data.red_count;
+            document.getElementById('black-count').innerText = data.black_count;
+        }
+
+        resetGame();
+    </script>
+</body>
+</html>
